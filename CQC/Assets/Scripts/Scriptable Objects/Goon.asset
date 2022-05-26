@@ -1,0 +1,42 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: ed12976b6d980654aa2c8109c289a6bb, type: 3}
+  m_Name: Goon
+  m_EditorClassIdentifier: 
+  headHealth: 100
+  neckHealth: 100
+  chestHealth: 100
+  torsoHealth: 100
+  hipHealth: 100
+  groinHealth: 100
+  shoulderLHealth: 100
+  shoulderRHealth: 100
+  upperArmLHealth: 100
+  upperArmRHealth: 100
+  elbowLHealth: 100
+  elbowRHealth: 100
+  forearmLHealth: 100
+  forearmRHealth: 100
+  WristLHealth: 100
+  WristRHealth: 100
+  HandLHealth: 100
+  HandRHealth: 100
+  thighLHealth: 100
+  thighRHealth: 100
+  kneeLHealth: 100
+  kneeRHealth: 100
+  shinLHealth: 100
+  shinRHealth: 100
+  ankleLHealth: 100
+  ankleRHealth: 100
+  footLHealth: 100
+  footRHealth: 100
