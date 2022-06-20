@@ -50,7 +50,6 @@ public class PlayerScript : MonoBehaviour
         //cam = GetComponent<Camera>();
         rig = GetComponent<Rigidbody>();
         animator.StartRecording(30);
-
     }
 
     // Update is called once per frame

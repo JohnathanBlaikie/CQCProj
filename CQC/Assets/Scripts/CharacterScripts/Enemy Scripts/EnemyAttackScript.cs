@@ -44,8 +44,7 @@ public class EnemyAttackScript : MonoBehaviour
     {
         Debug.Log("BLOCKED!");
         eMS.enemyAttackScript = GetComponent<EnemyAttackScript>();
-        eMS.anim.SetBool("Blocked", true);
-        eMS.anim.SetBool("Parried", false);
+        eMS.actionStatus = EnemyMasterScript.ActionStatus.Blocked;
         parried = false;
         blocked = true;
     }

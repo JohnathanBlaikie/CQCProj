@@ -16,7 +16,6 @@ public class EnemyBodySimple : MonoBehaviour
     public Rigidbody rig;
 
     public bool hitCheck = false;
-    
 
     private void Start()
     {

@@ -8,17 +8,28 @@ public class EnemyMasterScript : MonoBehaviour
     public EnemyBodySimple enemyBodySimple;
     public EnemyAttackScript enemyAttackScript;
     public PlayerScript pS;
+    public LayerMask targetMask;
+    public LayerMask[] obstructionMasks;
     public GenericEnemySO gESO;
     public GameObject head;
-    public enum ActionStatus { Idle, Roaming, Patrolling, Seeking, Attacking, Stunned, Parried}
+    public GameObject[] attackCollider;
+    
+    public enum ActionStatus { Idle, Roaming, Patrolling, Seeking, Attacking, Blocking, Evading, Stunned, Parried, Blocked }
     public ActionStatus actionStatus;
     public enum LastAttackDirection { PunchRight, PunchLeft, KickRight, KickLeft, Misc }
     public LastAttackDirection lastAttack;
     public Animator anim;
+    [Header("Misc. Attributes")]
+    [Range (0,360)]
+    public float fovAngle;
+    public float fovRadius;
+    public float maxAttackRange;
     [SerializeField]
-    private float seekDistance, minDistance, moveSpeed, accelSpeed, parryStun, parryStunMaxLength;
+    private float moveSpeed, rotationSpeed, accelSpeed, parryStun, parryStunMaxLength, seekTimerMax, seekTimer;
     public float AttackDamage;
-    
+    public bool canSeePlayer, playerInRange;
+
+    [Header("Health Values")]
     public float health;
     public float headHealth, neckHealth, chestHealth, torsoHealth, hipHealth, groinHealth;
     public float shoulderLHealth, shoulderRHealth, upperArmLHealth, upperArmRHealth, elbowLHealth, ElbowRHealth, forearmLHealth, forearmRHealth, wristLHealth, wristRHealth, handLHealth, handRHealth;
@@ -26,6 +37,8 @@ public class EnemyMasterScript : MonoBehaviour
 
     private int tempAnimRightInt, tempAnimUpInt, tempAnimTypeInt;
     private bool canAttack;
+
+    private Vector3 investigationPoint;
 
     //Figure out how to efficiently manage each body part's health
     // Start is called before the first frame update
@@ -39,17 +52,17 @@ public class EnemyMasterScript : MonoBehaviour
             {
                 try
                 {
-                    
+                    enemyBodySimpleArray[i].eS = this;
                     enemyBodySimpleArray[i].rig.isKinematic = true;
                     enemyBodySimpleArray[i].rig.useGravity = false;
                     enemyBodySimpleArray[i].rig.interpolation = RigidbodyInterpolation.None;
-
                 }
                 catch
                 {
                     //Debug.LogWarning("Something went wrong when setting " + enemyBodySimpleArray[i].gameObject.name + " to Kinematic!");
                     
                 }
+                
             }
             if (head == null)
             {
@@ -64,6 +77,7 @@ public class EnemyMasterScript : MonoBehaviour
                     }
                 }
             }
+            StartCoroutine(FOVRoutine());
         }
     }
 
@@ -104,21 +118,66 @@ public class EnemyMasterScript : MonoBehaviour
 
                 case ActionStatus.Attacking:
                     anim.SetInteger("PlayerDetectionState", 3);
-                    if (Vector3.Distance(gameObject.transform.position, pS.gameObject.transform.position) < minDistance && canAttack)
+                    //Debug.Log(Vector3.Distance(gameObject.transform.position, pS.gameObject.transform.position));
+                    if (playerInRange && canSeePlayer && canAttack)
                     {
-                        //Debug.Log("Close enough to attack");
-
-                        ///Use following line once other animations are done to randomize attack patterns.
-                        //tempAnimInt = anim.SetInteger("Right", Random.Range(-1,1)); ///Do something like this for the variables when anims are done.
-
                         GenerateAction();
-                        anim.SetBool("CanAttack", true);
+                        //anim.SetBool("CanAttack", true);
                     }
-                   
+                    else if(!playerInRange && !canSeePlayer)
+                    {
+                        investigationPoint = LogLastKnownPosition(pS.transform);
+                        actionStatus = ActionStatus.Seeking;
+                        seekTimer = seekTimerMax;
+                    }
+
                     break;
+
+                case ActionStatus.Seeking:
+                    //Add a countdown timer that sets the actionstatus to Patrolling if player is not found.
+                    seekTimer -= Time.deltaTime * Time.timeScale;
+                    if (canSeePlayer)
+                    {
+                        actionStatus = ActionStatus.Attacking;
+                    }
+                    else if(seekTimer <= 0)
+                    {
+                        actionStatus = ActionStatus.Patrolling;
+                    }
+                    ///TODO: ROTATE TOWARDS LAST KNOWN POSITION
+                    ///
+                    
+                    Vector3 tempTargetDirection = (pS.transform.position - transform.position).normalized;
+                    transform.rotation = Quaternion.Lerp(transform.rotation, Quaternion.LookRotation(tempTargetDirection), rotationSpeed * Time.deltaTime * Time.timeScale);
+
+                    break; 
+
+                case ActionStatus.Patrolling:
+                    if (canSeePlayer)
+                    {
+                        actionStatus = ActionStatus.Attacking;
+                        
+                    }
+                    seekTimer = seekTimerMax;
+                    break;
+
+                case ActionStatus.Blocking:
+                    anim.SetBool("Blocking", true);
+                    ///Maybe combine blocking and evading into one "Defending" State.
+                    break;
+
+                case ActionStatus.Evading:
+                    anim.SetBool("Evading", true);
+                    break;
+
+                case ActionStatus.Blocked:
+                    AttackBlocked();
+                    break;
+
                 case ActionStatus.Parried:
                     StageParry();
                     break;
+
                 case ActionStatus.Stunned:
                     if(parryStun > 0)
                     {
@@ -139,6 +198,71 @@ public class EnemyMasterScript : MonoBehaviour
         //}
     }
 
+    private IEnumerator FOVRoutine()
+    {
+        float delay = 0.2f;
+        WaitForSeconds wait = new WaitForSeconds(delay);
+
+        while (true)
+        {
+            yield return wait;
+            FOVCheck();
+        }
+    }
+
+    private void FOVCheck()
+    {
+        Collider[] rangeCheck = Physics.OverlapSphere(transform.position, fovRadius, targetMask);
+
+        if (rangeCheck.Length != 0)
+        {
+            Transform target = rangeCheck[0].transform;
+            Vector3 directionToTarget = (target.position - transform.position).normalized;
+
+            if (Vector3.Angle(transform.forward, directionToTarget) < fovAngle / 2)
+            {
+                float distanceToTarget = Vector3.Distance(transform.position, target.position);
+                for (int i = 0; i < obstructionMasks.Length; i++)
+                {
+                    if (!Physics.Raycast(transform.position, directionToTarget, distanceToTarget, obstructionMasks[i]))
+                    {
+                        canSeePlayer = true;
+                        if (distanceToTarget < maxAttackRange)
+                        {
+                            playerInRange = true;
+                        }
+                        else
+                        {
+                            playerInRange = false;
+                        }
+                    }
+                    else
+                    {
+                        canSeePlayer = false;
+                        playerInRange = false;
+                    }
+                }
+            }
+            else
+            {
+                canSeePlayer = false;
+                playerInRange = false;
+            }
+        }
+        else if (canSeePlayer || playerInRange)
+        {
+            canSeePlayer = false;
+            playerInRange = false;
+        }
+    }
+
+    private Vector3 LogLastKnownPosition(Transform _transform)
+    {
+        Vector3 tempV3 = _transform.transform.position;
+
+        return tempV3;
+    }
+
     public void ResetNPCAnimValues()
     {
         anim.SetFloat("PlayerDetectionState", 0);
@@ -149,6 +273,41 @@ public class EnemyMasterScript : MonoBehaviour
         canAttack = true;
         ResetEASVariables(enemyAttackScript);
     }
+
+    public void EnableAttackBox()
+    {
+        switch (lastAttack)
+        {
+            case LastAttackDirection.Misc:
+
+                break;
+            case LastAttackDirection.PunchLeft:
+                attackCollider[0].SetActive(true);
+                break;
+            case LastAttackDirection.PunchRight:
+                attackCollider[1].SetActive(true);
+                break;
+            case LastAttackDirection.KickLeft:
+                attackCollider[2].SetActive(true);
+                break;
+            case LastAttackDirection.KickRight:
+                attackCollider[3].SetActive(true);
+                break;
+
+
+        }
+        Debug.Log("Enabled Attack Box");
+    }
+    public void DisableAttackBox()
+    {
+        for(int i = 0; i < attackCollider.Length; i++)
+        {
+            attackCollider[i].SetActive(false);
+        }
+        Debug.Log("Disabled Attack Box");
+
+    }
+
 
     public void DamageHead(bodyPartMasterScript.TargetHead tHA, float damage)
     {
@@ -311,131 +470,32 @@ public class EnemyMasterScript : MonoBehaviour
         _eAS.ResetEnemyAttackVariables();
     }
 
-    public void ApplyDamage(bodyPartMasterScript.TargetGeneralArea tGA)
+    private void AttackBlocked()
     {
-        //switch (tGA)
-        //{
-        //    case bodyPartMasterScript.TargetGeneralArea.None:
-
-        //        break;
-        //    case bodyPartMasterScript.TargetGeneralArea.Head:
-        //        switch (tHA)
-        //        {
-        //            case bodyPartMasterScript.TargetHead.Head:
-
-        //                break;
-
-        //            case bodyPartMasterScript.TargetHead.Neck:
-
-        //                break;
-        //        }
-
-        //        break;
-        //    case bodyPartMasterScript.TargetGeneralArea.Torso:
-        //        switch (tTA)
-        //        {
-        //            case bodyPartMasterScript.TargetTorso.Chest:
-
-        //                break;
-
-        //            case bodyPartMasterScript.TargetTorso.Stomach:
-
-        //                break;
-
-        //            case bodyPartMasterScript.TargetTorso.Hip:
-
-        //                break;
-
-        //            case bodyPartMasterScript.TargetTorso.Groin:
-
-        //                break;
-
-        //        }
-        //        break;
-        //    case bodyPartMasterScript.TargetGeneralArea.Arm:
-        //        switch (tAA)
-        //        {
-        //            case bodyPartMasterScript.TargetArm.LUpperArm:
-
-        //                break;
-
-        //            case bodyPartMasterScript.TargetArm.RUpperArm:
-
-        //                break;
-
-        //            case bodyPartMasterScript.TargetArm.LForearm:
-
-        //                break;
-
-        //            case bodyPartMasterScript.TargetArm.RForearm:
-
-        //                break;
-
-        //            case bodyPartMasterScript.TargetArm.LWrist:
-
-        //                break;
-
-        //            case bodyPartMasterScript.TargetArm.RWrist:
-
-        //                break;
-
-        //            case bodyPartMasterScript.TargetArm.LHand:
-
-        //                break;
-
-        //            case bodyPartMasterScript.TargetArm.RHand:
-
-        //                break;
-
-        //        }
-
-        //        break;
-
-        //    case bodyPartMasterScript.TargetGeneralArea.Leg:
-        //        switch (tLA)
-        //        {
-        //            case bodyPartMasterScript.TargetLeg.ThighL:
-
-        //                break;
-
-        //            case bodyPartMasterScript.TargetLeg.ThighR:
-
-        //                break;
-
-        //            case bodyPartMasterScript.TargetLeg.KneeL:
-
-        //                break;
-
-        //            case bodyPartMasterScript.TargetLeg.KneeR:
-
-        //                break;
-        //            case bodyPartMasterScript.TargetLeg.ShinL:
-
-        //                break;
-
-        //            case bodyPartMasterScript.TargetLeg.ShinR:
-
-        //                break;
-
-        //            case bodyPartMasterScript.TargetLeg.AnkleL:
-
-        //                break;
-
-        //            case bodyPartMasterScript.TargetLeg.AnkleR:
-
-        //                break;
-
-
-        //        }
-
-        //        break;
+        anim.SetBool("Blocked", true);
+        anim.SetBool("Parried", false);
+        anim.SetFloat("AttackType", 0);
+        //Only a temporarily cut corner, but I'm re-using the attack-type
+        //float for blocking/parrying.
+        anim.speed = 0;
+        Vector3 tempTargetPosition = new Vector3
+            (pS.transform.position.x, transform.position.y, pS.transform.position.z);
+        //transform.LookAt(tempTargetPosition);
+        anim.speed = 1;
+        actionStatus = ActionStatus.Attacking;
     }
 
     private void StageParry()
     {
-        gameObject.transform.LookAt(pS.gameObject.transform);
         anim.SetBool("Blocked", true);
         anim.SetBool("Parried", true);
+        anim.SetFloat("AttackType", 1);
+
+        anim.speed = 0;
+        Vector3 tempRotation = new Vector3
+            (pS.transform.position.x, transform.position.y, pS.transform.position.z);
+        transform.LookAt(tempRotation);
+        anim.speed = 1;
         switch (lastAttack)
         {
             case LastAttackDirection.PunchRight:
@@ -482,15 +542,18 @@ public class EnemyMasterScript : MonoBehaviour
                 }
                 else
                 {
-                    lastAttack = LastAttackDirection.KickLeft;
+                    //lastAttack = LastAttackDirection.KickLeft;
                     Debug.Log("Placeholder for KickLeft");
-                    tempAnimUpInt = 1;
+                    lastAttack = LastAttackDirection.PunchLeft;
                 }
+                anim.SetBool("RightBool", false);
+
                 break;
             case 0:
                 //Misc. anims go here, maybe taunts, blocks, etc., for now it just defaults to a right punch.
                 tempAnimRightInt = 1;
                 tempAnimUpInt = 1;
+                anim.SetBool("RightBool", true);
                 break;
             case 1:
                 if (tempAnimUpInt == 1)
@@ -499,20 +562,20 @@ public class EnemyMasterScript : MonoBehaviour
                 }
                 else
                 {
-                    lastAttack = LastAttackDirection.KickRight;
+                    //lastAttack = LastAttackDirection.KickRight;
                     Debug.Log("Placeholder for KickRight");
-                    tempAnimUpInt = 1;
-
+                    lastAttack = LastAttackDirection.PunchRight;
                 }
+                anim.SetBool("RightBool", true);
+
                 break;
 
 
         }
-        ///Since the only animations I have are left jabs, I'm going to force left-only anims till I get the rights.
-        //anim.SetInteger("Right", tempAnimRightInt);
-        anim.SetInteger("Right", -1);
+        anim.SetInteger("Right", tempAnimRightInt);
         anim.SetInteger("Up", tempAnimUpInt);
-        anim.SetFloat("AttackType", (float)tempAnimTypeInt);
+        anim.SetFloat("AttackType", tempAnimTypeInt);
+        anim.SetBool("CanAttack", true);
         canAttack = false;
     }
 }
